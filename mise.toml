@@ -1,0 +1,130 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+# Go is not listed under [tools]: its version comes from the toolchain line in
+# go.mod, which stays the single source of truth (CI's release job reads the same file
+# through setup-go). Reading go.mod is off by default in mise, so it is enabled
+# here for go alone.
+[settings]
+idiomatic_version_file_enable_tools = ["go"]
+
+# Renovate's mise manager bumps these, so a version change is always a commit.
+#
+# govulncheck is built from source with the go.mod toolchain (the go: backend).
+# golangci-lint is the prebuilt release: it must be built with at least the Go
+# version of the code it checks, so check `golangci-lint version` when go.mod's
+# toolchain moves ahead of it (2.15.0 is built with go1.27.0).
+[tools]
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+gh = "2.102.0"
+golangci-lint = "2.15.0"
+goreleaser = "2.18.3"
+# Reads the Claude Code hook's JSON input (lint:hook).
+jq = "1.8.2"
+# Runs the .pre-commit-config.yaml hooks.
+prek = "0.5.7"
+
+[tasks.build]
+description = "Build for the current platform"
+run = 'go build -trimpath -ldflags "-s -w" -o nitpicker-tui .'
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./..."
+
+[tasks.test-race]
+description = "Run tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.test-cov]
+description = "Run tests with a coverage summary"
+run = "go test -cover ./..."
+
+# .golangci.yml sets `fix: true`; the check overrides it, so CI fails on an
+# issue instead of fixing a checkout nobody commits.
+[tasks.lint]
+description = "golangci-lint (linters and formatters) without fixing"
+run = "golangci-lint run --fix=false"
+
+[tasks."lint:fix"]
+description = "golangci-lint, applying the fixes it can"
+run = "golangci-lint run --fix"
+
+# The pre-commit hook, as golangci-lint's own hook does it: prek stashes
+# unstaged changes first, so the lines changed since HEAD are the staged ones.
+[tasks."lint:staged"]
+description = "golangci-lint --fix on the lines changed since HEAD (pre-commit)"
+run = "golangci-lint run --new-from-rev HEAD --fix"
+
+# The Claude Code PostToolUse hook (.claude/settings.json), which passes the
+# tool call as JSON on stdin. It lints the package of the edited file; exit
+# status 2 sends stderr back to Claude, so the remaining findings reach the
+# agent that made the edit.
+[tasks."lint:hook"]
+description = "golangci-lint --fix on the edited file's package, for the Claude Code hook"
+run = '''
+file=$(jq -r '.tool_input.file_path // empty')
+[ -n "$file" ] || exit 0
+golangci-lint run --fix "$(dirname "$file")" >&2 || exit 2
+'''
+
+[tasks."lint:all"]
+description = "Run every pre-commit hook on every file (prek)"
+run = "prek run --all-files"
+
+[tasks."hooks:install"]
+description = "Install the prek pre-commit hook into .git/hooks"
+run = "prek install"
+
+# Reachability-aware: only fails on vulnerabilities this code can actually
+# reach, unlike a plain dependency-version scan.
+[tasks.vuln]
+description = "Scan for reachable vulnerabilities with govulncheck"
+run = "govulncheck ./..."
+
+[tasks.build-all]
+description = "Cross-compile for common platforms into dist/"
+run = '''
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+  os=${target%/*}
+  arch=${target#*/}
+  ext=""
+  if [ "$os" = windows ]; then ext=.exe; fi
+  GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w" -o "dist/nitpicker-tui-$os-$arch$ext" .
+done
+'''
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -rf nitpicker-tui dist/"
+
+# --local keeps `mise upgrade` to this file; without it, it also rewrites the
+# global mise config. Go itself is not bumped here: its version is the go.mod
+# toolchain line, which Renovate moves.
+[tasks.update]
+description = "Update Go modules and mise tools to their latest versions"
+run = ["go get -u -t ./...", "go mod tidy", "mise upgrade --bump --local"]
+
+[tasks.release]
+description = "Tag and push a CalVer release (requires a clean main branch)"
+run = '''
+if ! gh extension list | grep -q calver; then
+  gh extension install ivuorinen/gh-calver
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "Error: working tree is not clean"
+  exit 1
+fi
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+  echo "Error: not on main branch"
+  exit 1
+fi
+tag=$(gh calver next)
+echo "Releasing $tag..."
+git tag -a "$tag" -m "Release $tag"
+git push origin "$tag"
+echo "Tag $tag pushed. GitHub Actions will build and sign the release."
+'''
+
+[tasks.all]
+description = "Lint, race-enabled tests, vulnerability scan and build: the CI gates"
+depends = ["lint", "test-race", "vuln", "build"]

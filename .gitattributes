@@ -1,0 +1,3 @@
+# LF in every checkout, Windows included: .editorconfig requires LF, and the
+# fixture store under testdata/ is parsed the same way on every platform.
+* text=auto eol=lf

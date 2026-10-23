@@ -1,0 +1,125 @@
+---
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+version: "2"
+
+# golangci-lint configuration, from ivuorinen/git-dirty (itself from
+# ivuorinen/gh-action-readme). The linters and thresholds are unchanged; the
+# forbidigo, depguard and goimports settings encode this repository's rules
+# instead of that one's.
+#
+# Aligned with SonarCloud "Sonar way" quality gate
+# https://docs.sonarsource.com/sonarqube-cloud/standards/managing-quality-gates/
+#
+# Key alignments:
+# - gosec: Aligns with Security Rating A requirement (no vulnerabilities)
+# - gocyclo (min: 10): Stricter than SonarCloud (not enforced)
+# - dupl: Aligns with duplicated lines density <= 3%
+# - lll (120 chars): Stricter than SonarCloud (not enforced)
+#
+# SonarCloud focuses on new code (last 30 days), local linting checks entire codebase
+# Local standards are intentionally stricter in some areas (complexity, line length)
+
+run:
+  timeout: 5m
+  go: "1.27"
+
+linters:
+  default: standard
+
+  enable:
+    # Additional linters beyond standard
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - contextcheck
+    - depguard
+    - dupl
+    - errname
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - funcorder
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - godox
+    - goheader
+    - gosec
+    - iface
+    - importas
+    - lll
+    - maintidx
+    - misspell
+    - nilerr
+    - nlreturn
+    - nolintlint
+    - perfsprint
+    - prealloc
+    - predeclared
+    - reassign
+    - revive
+    - tagalign
+    - testableexamples
+    - thelper
+    - usestdlibvars
+    - usetesting
+
+  disable:
+    # Disable noisy linters
+    - funlen
+    - wsl
+    - wrapcheck
+
+  settings:
+    lll:
+      line-length: 120
+    misspell:
+      locale: US
+    gocyclo:
+      min-complexity: 10
+    goconst:
+      min-len: 2
+      min-occurrences: 3
+    # CLAUDE.md: nitpicker-tui never executes anything at runtime. Markdown is
+    # rendered in-process with glamour, not by running glow.
+    forbidigo:
+      forbid:
+        - pattern: '^exec\.Command(Context)?$'
+          msg: "nitpicker-tui never executes programs; markdown is rendered in-process with glamour (CLAUDE.md)"
+    # CLAUDE.md: internal/findings imports the standard library only; every
+    # third-party module stays behind internal/ui.
+    depguard:
+      rules:
+        internal-findings-stdlib-only:
+          files:
+            - "**/internal/findings/**"
+            - "!$test"
+          allow:
+            - $gostd
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - golines
+
+  settings:
+    golines:
+      max-len: 120
+    gofmt:
+      simplify: true
+      rewrite-rules:
+        - pattern: "interface{}"
+          replacement: "any"
+        - pattern: "a[b:len(a)]"
+          replacement: "a[b:]"
+    goimports:
+      local-prefixes:
+        - github.com/ivuorinen/nitpicker-tui
+
+issues:
+  max-issues-per-linter: 150
+  max-same-issues: 50
+  fix: true
