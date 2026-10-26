@@ -101,19 +101,17 @@ func TestFindStoreRefusesSymlinkedComponent(t *testing.T) {
 	}
 }
 
-// A store path that cannot be resolved (here a symlink loop, ELOOP; an
-// unreadable directory gives EACCES) is reported as such, not as missing.
+// A stat error other than a missing path is reported as such, not as a
+// missing store. A name longer than any file system allows gives one on every
+// platform; a symlink loop does not, as Windows reports it as a missing path.
 func TestFindStoreReportsStatErrors(t *testing.T) {
 	t.Parallel()
 
-	project := t.TempDir()
-	if err := os.Symlink(filepath.Join(project, "docs"), filepath.Join(project, "docs")); err != nil {
-		t.Skipf("cannot create symlinks here: %v", err)
-	}
+	project := filepath.Join(t.TempDir(), strings.Repeat("x", 300))
 
 	got, err := findStore(project)
 	if err == nil || strings.Contains(err.Error(), "no docs/audit/findings") {
-		t.Errorf("findStore with a looping docs symlink = %q, %v; want the stat error", got, err)
+		t.Errorf("findStore under a 300-byte name = %q, %v; want the stat error", got, err)
 	}
 }
 

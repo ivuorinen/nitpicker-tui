@@ -84,7 +84,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // findStore returns the findings store of start or of its nearest ancestor
 // that has one, the way git finds .git. Only a path that does not exist moves
-// the search up: any other error (permission, symlink loop) is returned, so it
+// the search up: any other error (permission, a name too long, a symlink loop
+// outside Windows, which reports one as a missing path) is returned, so it
 // is neither misreported as a missing store nor answered with an ancestor's.
 func findStore(start string) (string, error) {
 	dir, err := filepath.Abs(start)
