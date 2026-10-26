@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -102,16 +105,19 @@ func TestFindStoreRefusesSymlinkedComponent(t *testing.T) {
 }
 
 // A stat error other than a missing path is reported as such, not as a
-// missing store. A name longer than any file system allows gives one on every
-// platform; a symlink loop does not, as Windows reports it as a missing path.
+// missing store. Windows reports a symlink loop and an over-long name alike as
+// a missing path, so the case is checked where the name gives ENAMETOOLONG.
 func TestFindStoreReportsStatErrors(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports an over-long name as a missing path, not as a stat error")
+	}
 
 	project := filepath.Join(t.TempDir(), strings.Repeat("x", 300))
 
 	got, err := findStore(project)
-	if err == nil || strings.Contains(err.Error(), "no docs/audit/findings") {
-		t.Errorf("findStore under a 300-byte name = %q, %v; want the stat error", got, err)
+	if !errors.Is(err, syscall.ENAMETOOLONG) {
+		t.Errorf("findStore under a 300-byte name = %q, %v; want ENAMETOOLONG", got, err)
 	}
 }
 

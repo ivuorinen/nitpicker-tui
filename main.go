@@ -84,9 +84,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // findStore returns the findings store of start or of its nearest ancestor
 // that has one, the way git finds .git. Only a path that does not exist moves
-// the search up: any other error (permission, a name too long, a symlink loop
-// outside Windows, which reports one as a missing path) is returned, so it
-// is neither misreported as a missing store nor answered with an ancestor's.
+// the search up: any other error is returned, so it is neither misreported as
+// a missing store nor answered with an ancestor's. That is a permission error
+// anywhere, and outside Windows, which reports both as a missing path, a
+// symlink loop or a name too long.
 func findStore(start string) (string, error) {
 	dir, err := filepath.Abs(start)
 	if err != nil {
