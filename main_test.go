@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -65,18 +66,34 @@ func TestRunWithoutStore(t *testing.T) {
 	}
 }
 
-// Not parallel: it swaps os.Args and exit, which every test shares.
+// Not parallel: it swaps os.Args, os.Stdout and exit, which every test
+// shares. main's output goes to a file, so it stays out of the test log.
 func TestMainExitsWithRunsCode(t *testing.T) {
-	args, prev := os.Args, exit
-	t.Cleanup(func() { os.Args, exit = args, prev })
+	out, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, stdout, prev := os.Args, os.Stdout, exit
+	t.Cleanup(func() {
+		os.Args, os.Stdout, exit = args, stdout, prev
+		_ = out.Close()
+	})
 	os.Args = []string{"nitpicker-tui", "-version"}
+	os.Stdout = out
 	code := -1
 	exit = func(c int) { code = c }
 
 	main()
 
-	if code != 0 {
-		t.Errorf("main exited with %d, want 0", code)
+	if _, err := out.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	printed, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 || string(printed) != "dev\n" {
+		t.Errorf("main exited with %d after printing %q, want 0 and %q", code, printed, "dev\n")
 	}
 }
 
@@ -208,10 +225,12 @@ func TestFindStoreReportsStatErrors(t *testing.T) {
 
 // A working directory that no longer exists cannot be made absolute; that is
 // reported, not taken for a missing store. Not parallel: t.Chdir changes the
-// whole process's working directory.
+// whole process's working directory. Linux only: there getcwd is known to
+// fail for a removed directory, Windows cannot remove one, and macOS has not
+// been seen to fail rather than return the old path.
 func TestFindStoreReportsUnresolvableWorkingDir(t *testing.T) {
-	if runtime.GOOS == goosWindows {
-		t.Skip("Windows cannot remove a process's working directory")
+	if runtime.GOOS != "linux" {
+		t.Skip("getcwd failing for a removed working directory is known on Linux only")
 	}
 
 	gone := filepath.Join(t.TempDir(), "gone")
@@ -325,7 +344,8 @@ func TestLoaderSeesChangesBetweenLoads(t *testing.T) {
 	}
 }
 
-// A store removed between loads fails the next load with os.OpenRoot's error.
+// A store directory that is not there, as after one is removed between loads,
+// fails the load with os.OpenRoot's error.
 func TestLoaderReportsUnopenableStore(t *testing.T) {
 	t.Parallel()
 
