@@ -17,6 +17,9 @@ module=$(go list -m)
 go list ./... > "$tmp/packages"
 
 go test -v -race -covermode=atomic -coverpkg=./... -coverprofile="$tmp/cover.out" ./...
+# go test's own "coverage: N% of statements in ./..." lines count one test
+# binary each; say so before the merged figures, which follow them in the log.
+echo "coverage: the go test percentages above count one test binary each; the merged report follows"
 
 # S <package> <statements run> <statements> <lines run> <lines> per package,
 # and U <file>:<line> per block with statements that never ran. Each test
@@ -48,7 +51,11 @@ awk -v module="$module" '
 
 # B <package> <branch outcomes seen> <branch outcomes>, and U per branch with
 # an outcome never seen. gobco takes one package per call and exits 1 when a
-# test fails; its own output is shown only then.
+# test fails; its own output is shown only then. It copies the whole module
+# root for each call and fails if a file vanishes during the copy, so the
+# build task waits for this one (mise.toml) rather than rewriting the binary
+# meanwhile. A condition spanning lines arrives with its line breaks, which
+# are folded to spaces to keep each gap on one line.
 i=0
 while read -r pkg; do
   i=$((i + 1))
@@ -64,7 +71,7 @@ while read -r pkg; do
   jq -r --arg pkg "$pkg" '
     "B\t\($pkg)\t\(map((if .TrueCount > 0 then 1 else 0 end) + (if .FalseCount > 0 then 1 else 0 end)) | add // 0)\t\(length * 2)",
     (.[] | select(.TrueCount == 0 or .FalseCount == 0)
-      | "U\t`\(.Start)` branch `\(.Code)` never \(if .TrueCount == 0 and .FalseCount == 0 then "evaluated"
+      | "U\t`\(.Start)` branch `\(.Code | gsub("\\s+"; " "))` never \(if .TrueCount == 0 and .FalseCount == 0 then "evaluated"
           elif .TrueCount == 0 then "true" else "false" end)")
   ' "$stats" >> "$tmp/branches.tsv"
 done < "$tmp/packages"

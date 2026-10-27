@@ -28,6 +28,9 @@ prek = "0.5.7"
 
 [tasks.build]
 description = "Build for the current platform"
+# gobco (coverage) copies the module root, binary included, and fails when a
+# file vanishes mid-copy; in `mise run all` the build waits for it.
+wait_for = ["coverage"]
 run = 'go build -trimpath -ldflags "-s -w" -o nitpicker-tui .'
 
 [tasks.test]
