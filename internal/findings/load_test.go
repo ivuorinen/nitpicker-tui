@@ -1,9 +1,11 @@
 package findings
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -396,5 +398,106 @@ func TestLoadOnDiskSymlinkEscape(t *testing.T) {
 	}
 	if len(s.Warnings) != 2 {
 		t.Errorf("warnings = %q, want one per symlink", s.Warnings)
+	}
+}
+
+// errInjected is the read error failFS returns.
+var errInjected = errors.New("injected read error")
+
+// failFS is a MapFS whose named files fail to read, for the read errors MapFS
+// cannot produce. fs.ReadFile prefers a ReadFileFS, so ReadFile is enough.
+type failFS struct {
+	fstest.MapFS
+
+	fail map[string]bool
+}
+
+func (f failFS) ReadFile(name string) ([]byte, error) {
+	if f.fail[name] {
+		return nil, errInjected
+	}
+
+	return f.MapFS.ReadFile(name)
+}
+
+func storeIDs(s Store) []string {
+	ids := make([]string, len(s.Findings))
+	for i, f := range s.Findings {
+		ids[i] = f.ID
+	}
+
+	return ids
+}
+
+// A file that cannot be read is a warning naming it, and every other finding
+// still loads.
+func TestLoadReportsUnreadableFiles(t *testing.T) {
+	t.Parallel()
+
+	s := mustLoad(t, failFS{
+		MapFS: fstest.MapFS{
+			"a/open/A-1.md": openFile("id: A-1\n", "One", ""),
+			"a/open/A-2.md": openFile("id: A-2\n", "Two", ""),
+			LedgerName:      {Data: []byte(`{"id":"R-1","status":"fixed"}` + "\n")},
+		},
+		fail: map[string]bool{"a/open/A-1.md": true, LedgerName: true},
+	})
+
+	if got := storeIDs(s); !slices.Equal(got, []string{"A-2"}) {
+		t.Errorf("findings = %q, want only A-2", got)
+	}
+	want := []string{"a/open/A-1.md: injected read error", "resolved.jsonl: injected read error"}
+	if !slices.Equal(s.Warnings, want) {
+		t.Errorf("warnings = %q, want %q", s.Warnings, want)
+	}
+}
+
+// An <auditor>/open that is a file, not a directory, is a warning.
+func TestLoadReportsOpenThatIsNotADirectory(t *testing.T) {
+	t.Parallel()
+
+	s := mustLoad(t, fstest.MapFS{"a/open": {Data: []byte("x")}})
+	if len(s.Findings) != 0 || len(s.Warnings) != 1 || !strings.HasPrefix(s.Warnings[0], "a/open: ") {
+		t.Errorf("findings %d, warnings %q; want none and one about a/open", len(s.Findings), s.Warnings)
+	}
+}
+
+// A ledger that is not a regular file is skipped: a FIFO would block the read.
+func TestLoadSkipsIrregularLedger(t *testing.T) {
+	t.Parallel()
+
+	s := mustLoad(t, fstest.MapFS{LedgerName: {Mode: fs.ModeNamedPipe}})
+	want := []string{"resolved.jsonl: not a regular file; skipped"}
+	if len(s.Findings) != 0 || !slices.Equal(s.Warnings, want) {
+		t.Errorf("findings %d, warnings %q; want none and %q", len(s.Findings), s.Warnings, want)
+	}
+}
+
+// A ledger field of the wrong JSON type is a warning for its line; the other
+// lines still load.
+func TestLoadLedgerWrongFieldTypes(t *testing.T) {
+	t.Parallel()
+
+	ledger := `{"id":5}` + "\n" +
+		`{"id":"R-2","extra":5}` + "\n" +
+		`{"id":"R-3","extra":{"location":5}}` + "\n" +
+		`{"id":"R-4","status":"fixed"}` + "\n"
+	s := mustLoad(t, fstest.MapFS{LedgerName: {Data: []byte(ledger)}})
+
+	if got := storeIDs(s); !slices.Equal(got, []string{"R-4"}) {
+		t.Errorf("findings = %q, want only R-4", got)
+	}
+	prefixes := []string{
+		`resolved.jsonl:1: field "id": `,
+		`resolved.jsonl:2: extra: `,
+		`resolved.jsonl:3: extra: field "location": `,
+	}
+	if len(s.Warnings) != len(prefixes) {
+		t.Fatalf("warnings = %q, want %d", s.Warnings, len(prefixes))
+	}
+	for i, p := range prefixes {
+		if !strings.HasPrefix(s.Warnings[i], p) {
+			t.Errorf("warning %d = %q, want the prefix %q", i+1, s.Warnings[i], p)
+		}
 	}
 }

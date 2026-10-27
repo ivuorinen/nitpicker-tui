@@ -170,9 +170,10 @@ its test must fail.
 - `splitLines` on every `str.splitlines` separator, adding `\v`, `\f`,
   `\x1c`-`\x1e`, U+0085 and U+2029, written as UTF-8 byte escapes so no raw
   separator lands in a source file;
-- a fault-injecting `fs.FS` wrapping `fstest.MapFS`: the open directory, an
-  open file and the ledger fail to read, and a ledger that is not a regular
-  file; each yields a warning, never a dropped finding;
+- an open directory that fails to read (a file in its place), an open file
+  and the ledger that fail to read (a fault-injecting `fs.FS` wrapping
+  `fstest.MapFS`), and a ledger that is not a regular file; each yields a
+  warning naming the file, and every other finding still loads;
 - ledger lines whose `id`, `extra` or `extra.location` has the wrong JSON
   type: a warning per line.
 
