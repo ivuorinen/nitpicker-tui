@@ -72,7 +72,7 @@ to control your terminal or to read files outside the store.
 ## Development
 
 ```sh
-mise run all        # lint + race-enabled tests + govulncheck + build (the CI gates)
+mise run all        # lint + race tests with the 100% coverage gate + govulncheck + build (the CI gates)
 mise run test       # tests
 mise run lint:all   # every pre-commit hook on every file
 go run . testdata/store   # browse the fixture store

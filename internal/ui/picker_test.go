@@ -225,3 +225,20 @@ func TestPickerKeepsVanishedSelection(t *testing.T) {
 		t.Errorf("cursor on %q, want the vanished selection kept with count 0", got)
 	}
 }
+
+// down in the picker moves the cursor to the next value.
+func TestPickerDownMovesCursor(t *testing.T) {
+	t.Parallel()
+
+	m, _ := press(t, newTestModel(t, fixtureFiles()), "l")
+	start := m.picker.list.Index()
+	if len(pickerTitles(m)) < start+2 {
+		t.Fatalf("set-up: rows %q leave nothing below the cursor", pickerTitles(m))
+	}
+
+	m, _ = press(t, m, "down")
+
+	if got := m.picker.list.Index(); got != start+1 {
+		t.Errorf("cursor at %d after down, want %d", got, start+1)
+	}
+}

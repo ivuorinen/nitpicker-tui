@@ -47,18 +47,21 @@ func header(f findings.Finding) string {
 // renderBody renders markdown in the given glamour style. Building a
 // renderer costs a fraction of the render itself, so one is built per call
 // rather than kept in step with the width and the terminal background. If
-// rendering fails, the markdown is shown as it is, below the error. Either
-// way the result passes through keepStyling before it can reach the screen.
+// building the renderer or rendering fails, the markdown is shown as it is,
+// below the error; both failures share the one branch an unknown style name
+// reaches. Either way the result passes through keepStyling before it can
+// reach the screen.
 func renderBody(body, style string, width int) string {
 	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(style), glamour.WithWordWrap(wrapWidth(width)))
+	var out string
 	if err == nil {
-		var out string
-		if out, err = r.Render(body); err == nil {
-			return keepStyling(out)
-		}
+		out, err = r.Render(body)
+	}
+	if err != nil {
+		out = fmt.Sprintf("render failed: %v\n\n%s", err, body)
 	}
 
-	return keepStyling(fmt.Sprintf("render failed: %v\n\n%s", err, body))
+	return keepStyling(out)
 }
 
 // keepStyling drops every escape sequence and control character except SGR

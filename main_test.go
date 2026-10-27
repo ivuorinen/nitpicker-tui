@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,7 +13,13 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
+
+// goosWindows is runtime.GOOS on Windows, whose filesystem rules some tests
+// cannot exercise.
+const goosWindows = "windows"
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
@@ -54,6 +63,99 @@ func TestRunWithoutStore(t *testing.T) {
 	code, _, errOut := runArgs(t.TempDir())
 	if code != 1 || !strings.Contains(errOut, "no docs/audit/findings") {
 		t.Errorf("run in a directory without a store = %d %q, want 1 and the reason", code, errOut)
+	}
+}
+
+// Not parallel: it swaps os.Args, os.Stdout and exit, which every test
+// shares. main's output goes to a file, so it stays out of the test log.
+func TestMainExitsWithRunsCode(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, stdout, prev := os.Args, os.Stdout, exit
+	t.Cleanup(func() {
+		os.Args, os.Stdout, exit = args, stdout, prev
+		_ = out.Close()
+	})
+	os.Args = []string{"nitpicker-tui", "-version"}
+	os.Stdout = out
+	code := -1
+	exit = func(c int) { code = c }
+
+	main()
+
+	if _, err := out.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	printed, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 || string(printed) != "dev\n" {
+		t.Errorf("main exited with %d after printing %q, want 0 and %q", code, printed, "dev\n")
+	}
+}
+
+// runUI runs the program on dir without a terminal: input is typed into it,
+// and screen is what it writes. A program that starts always writes the
+// alternate-screen sequence first, even when it quits before drawing.
+func runUI(dir, input string, extra ...tea.ProgramOption) (code int, stderr, screen string) {
+	var out, errOut, scr bytes.Buffer
+	opts := append([]tea.ProgramOption{tea.WithInput(strings.NewReader(input)), tea.WithOutput(&scr)}, extra...)
+	code = run([]string{dir}, &out, &errOut, opts...)
+
+	return code, errOut.String(), scr.String()
+}
+
+func TestRunBrowsesAndQuits(t *testing.T) {
+	t.Parallel()
+
+	code, errOut, screen := runUI("testdata/store", "q")
+	if code != 0 || errOut != "" {
+		t.Errorf("run testdata/store = %d %q, want 0 and nothing on stderr", code, errOut)
+	}
+	if !strings.Contains(screen, "\x1b[?1049h") {
+		t.Errorf("the program never started: output %q", screen)
+	}
+}
+
+func TestRunReportsUIErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	code, errOut, _ := runUI("testdata/store", "", tea.WithContext(ctx))
+	if code != 1 || !strings.HasPrefix(errOut, "nitpicker-tui: program was killed") {
+		t.Errorf("run with a canceled program = %d %q, want 1 and the error", code, errOut)
+	}
+}
+
+// A store findStore accepts but cannot open fails before the program starts,
+// with the same message and exit code as before the first load moved into
+// ui.Run.
+func TestRunReportsUnreadableStore(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == goosWindows || os.Geteuid() == 0 {
+		t.Skip("needs POSIX permissions and a user they apply to")
+	}
+
+	project := t.TempDir()
+	store := filepath.Join(project, "docs", "audit", "findings")
+	if err := os.MkdirAll(store, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Empty, so t.TempDir's cleanup removes it without the mode restored.
+	if err := os.Chmod(store, 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	code, errOut, screen := runUI(project, "q")
+	if code != 1 || !strings.HasPrefix(errOut, "nitpicker-tui: ") || !strings.Contains(errOut, "permission denied") {
+		t.Errorf("run on an unreadable store = %d %q, want 1 and the error", code, errOut)
+	}
+	if screen != "" {
+		t.Errorf("a program started after the failed load: %q", screen)
 	}
 }
 
@@ -109,7 +211,7 @@ func TestFindStoreRefusesSymlinkedComponent(t *testing.T) {
 // a missing path, so the case is checked where the name gives ENAMETOOLONG.
 func TestFindStoreReportsStatErrors(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("Windows reports an over-long name as a missing path, not as a stat error")
 	}
 
@@ -118,6 +220,31 @@ func TestFindStoreReportsStatErrors(t *testing.T) {
 	got, err := findStore(project)
 	if !errors.Is(err, syscall.ENAMETOOLONG) {
 		t.Errorf("findStore under a 300-byte name = %q, %v; want ENAMETOOLONG", got, err)
+	}
+}
+
+// A working directory that no longer exists cannot be made absolute; that is
+// reported, not taken for a missing store. Not parallel: t.Chdir changes the
+// whole process's working directory. Linux only: there getcwd is known to
+// fail for a removed directory, Windows cannot remove one, and macOS has not
+// been seen to fail rather than return the old path.
+func TestFindStoreReportsUnresolvableWorkingDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("getcwd failing for a removed working directory is known on Linux only")
+	}
+
+	gone := filepath.Join(t.TempDir(), "gone")
+	if err := os.Mkdir(gone, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := findStore(".")
+	if !errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "no docs/audit/findings") {
+		t.Errorf("findStore from a removed directory = %q, %v; want the getwd error", got, err)
 	}
 }
 
@@ -214,5 +341,16 @@ func TestLoaderSeesChangesBetweenLoads(t *testing.T) {
 	want := []string{"audit-00000001", "audit-00000002", "audit-00000003", "audit-00000004"}
 	if got := loadedIDs(t, ids); !slices.Equal(got, want) {
 		t.Errorf("second load = %q, want %q", got, want)
+	}
+}
+
+// A store directory that is not there, as after one is removed between loads,
+// fails the load with os.OpenRoot's error.
+func TestLoaderReportsUnopenableStore(t *testing.T) {
+	t.Parallel()
+
+	_, err := newLoader(filepath.Join(t.TempDir(), "missing"))()
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("loading a missing store = %v, want a not-exist error", err)
 	}
 }

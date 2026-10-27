@@ -50,8 +50,10 @@ jobs:
       - name: Lint (pre-commit hooks)
         run: mise run lint:all
 
-      - name: Test with race detector
-        run: mise run test-race
+      # The race tests, then statement, line and branch coverage: the table
+      # goes to the job summary, and anything below 100% fails the job.
+      - name: Test with race detector and coverage
+        run: mise run coverage
 
       - name: Build
         run: mise run build
@@ -77,8 +79,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # -v lists every test, so a skip and its reason show in the log.
       - name: Test
-        run: go test ./...
+        run: go test -v ./...
 
   govulncheck:
     name: Vulnerability scan

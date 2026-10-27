@@ -66,6 +66,12 @@ category, renders a finding's markdown with glamour, and rescans on `r`.
   search text.
 - **golangci-lint findings are fixed, not suppressed.** A PostToolUse hook in
   `.claude/settings.json` runs `mise run lint:hook` after every `.go` edit.
+- **Coverage is 100% statements, lines and branches.** `mise run coverage`
+  fails below it, and CI runs it. Nothing is excluded: a gap is closed by a
+  test, or, for code no test can reach, by reshaping it so the failure shares
+  a branch tests do reach (as `renderBody` and `refuseSymlinks` do). Branches
+  come from gobco, pinned in `mise.toml`; a one-off command for a
+  mise-installed tool is run with `mise exec --`.
 
 ## Development Commands
 
@@ -74,13 +80,15 @@ mise install         # Go (go.mod toolchain line) and the pinned dev tools
 mise run build       # Build ./nitpicker-tui
 mise run test        # Run the full test suite
 mise run test-race   # Tests with the race detector
+mise run coverage    # race tests; fails below 100% statements, lines, branches
 mise run lint        # golangci-lint (.golangci.yml), no fixes: the CI check
 mise run lint:fix    # golangci-lint, applying its fixes
 mise run lint:all    # every pre-commit hook (prek) on every tracked file
 mise run hooks:install  # install the prek pre-commit hook
 mise run vuln        # govulncheck
-mise run all         # lint + test-race + vuln + build (the CI gates)
+mise run all         # lint + coverage + vuln + build (the CI gates)
 go test ./internal/findings/ -run TestParseFinding   # One test
+mise exec -- gobco -branch ./internal/ui              # One package's branch coverage
 go test -run '^$' -bench . ./internal/findings/       # Filter and Counts benchmarks
 go run . testdata/store                               # Browse the fixture store
 ```
@@ -112,5 +120,6 @@ rescan call: `os.OpenRoot` -> `findings.Load(root.FS())` -> close.
   checksums with cosign keyless, and attaches `LICENSE` and the go-licenses
   `THIRD_PARTY_NOTICES.txt`.
 - CI (`.github/workflows/ci.yml`) runs golangci-lint, every pre-commit hook,
-  race tests and the build through mise, plain `go test` on macOS and
-  Windows, and govulncheck.
+  the race tests with the 100% coverage gate (its table in the job summary)
+  and the build through mise, `go test -v` on macOS and Windows, and
+  govulncheck.

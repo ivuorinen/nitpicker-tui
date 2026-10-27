@@ -121,6 +121,21 @@ func TestKeepStyling(t *testing.T) {
 	}
 }
 
+// glamour rejects an unknown style name; the markdown is then shown as it is,
+// below the error, and still passes through keepStyling.
+func TestRenderBodyFallsBackOnRenderError(t *testing.T) {
+	t.Parallel()
+
+	got := renderBody("body \x1b[2Jtext", "no-such-style", 80)
+	const want = "render failed: no-such-style: style not found\n\n"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("renderBody = %q, want the prefix %q", got, want)
+	}
+	if !strings.Contains(got, "body text") || strings.Contains(got, "\x1b[2J") {
+		t.Errorf("fallback body %q: want the text, without the escape", got)
+	}
+}
+
 func TestBackgroundColorPicksStyle(t *testing.T) {
 	t.Parallel()
 
@@ -192,5 +207,15 @@ func TestWarningsView(t *testing.T) {
 	}
 	if content := m.View().Content; !strings.Contains(content, "audit/open/NIT-119.md: no frontmatter") {
 		t.Errorf("warnings view lacks the damaged file: %q", content)
+	}
+}
+
+// A key other than back scrolls the detail view and stays in it.
+func TestDetailKeepsNonBackKeys(t *testing.T) {
+	t.Parallel()
+
+	m, _ := press(t, newTestModel(t, fixtureFiles()), "enter", "down")
+	if m.mode != modeDetail {
+		t.Errorf("mode = %v after down, want detail", m.mode)
 	}
 }

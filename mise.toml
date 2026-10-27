@@ -15,16 +15,22 @@ idiomatic_version_file_enable_tools = ["go"]
 # toolchain moves ahead of it (2.15.0 is built with go1.27.0).
 [tools]
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+# Branch coverage for `mise run coverage`: Go itself measures statements only.
+"go:github.com/rillig/gobco" = "1.3.4"
 gh = "2.102.0"
 golangci-lint = "2.15.0"
 goreleaser = "2.18.3"
-# Reads the Claude Code hook's JSON input (lint:hook).
+# Reads the Claude Code hook's JSON input (lint:hook) and gobco's coverage
+# stats (coverage).
 jq = "1.8.2"
 # Runs the .pre-commit-config.yaml hooks.
 prek = "0.5.7"
 
 [tasks.build]
 description = "Build for the current platform"
+# gobco (coverage) copies the module root, binary included, and fails when a
+# file vanishes mid-copy; in `mise run all` the build waits for it.
+wait_for = ["coverage"]
 run = 'go build -trimpath -ldflags "-s -w" -o nitpicker-tui .'
 
 [tasks.test]
@@ -34,10 +40,6 @@ run = "go test ./..."
 [tasks.test-race]
 description = "Run tests with the race detector"
 run = "go test -race ./..."
-
-[tasks.test-cov]
-description = "Run tests with a coverage summary"
-run = "go test -cover ./..."
 
 # .golangci.yml sets `fix: true`; the check overrides it, so CI fails on an
 # issue instead of fixing a checkout nobody commits.
@@ -126,5 +128,5 @@ echo "Tag $tag pushed. GitHub Actions will build and sign the release."
 '''
 
 [tasks.all]
-description = "Lint, race-enabled tests, vulnerability scan and build: the CI gates"
-depends = ["lint", "test-race", "vuln", "build"]
+description = "Lint, race tests with the 100% coverage gate, vulnerability scan and build: the CI gates"
+depends = ["lint", "coverage", "vuln", "build"]

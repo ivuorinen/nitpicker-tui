@@ -2,6 +2,7 @@ package findings
 
 import (
 	"maps"
+	"slices"
 	"testing"
 )
 
@@ -138,5 +139,21 @@ func TestParseFinding(t *testing.T) {
 				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
 			}
 		})
+	}
+}
+
+// splitLines breaks a line wherever Python's str.splitlines does: "\r\n" is
+// one break, and so is each of the other separators. U+0085, U+2028 and
+// U+2029 are written as UTF-8 bytes so no raw separator lands in this file.
+func TestSplitLinesSeparators(t *testing.T) {
+	t.Parallel()
+
+	for _, sep := range []string{
+		"\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e",
+		"\xc2\x85", "\xe2\x80\xa8", "\xe2\x80\xa9",
+	} {
+		if got := splitLines("a" + sep + "b"); !slices.Equal(got, []string{"a", "b"}) {
+			t.Errorf("splitLines(%q) = %q, want [a b]", "a"+sep+"b", got)
+		}
 	}
 }

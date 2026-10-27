@@ -118,9 +118,19 @@ func New(store findings.Store, reload Reload) Model {
 	return m
 }
 
-// Run shows store until the user quits, calling reload for each rescan.
-func Run(store findings.Store, reload Reload) error {
-	_, err := tea.NewProgram(New(store, reload)).Run()
+// Option configures the program Run starts. main passes none, so bubbletea
+// keeps its own terminal handling; tests pass their input and output.
+type Option = tea.ProgramOption
+
+// Run loads the first store through reload, the loader every rescan uses, and
+// shows it until the user quits. A failed load returns before the program
+// starts.
+func Run(reload Reload, opts ...Option) error {
+	store, err := reload()
+	if err != nil {
+		return err
+	}
+	_, err = tea.NewProgram(New(store, reload), opts...).Run()
 
 	return err
 }

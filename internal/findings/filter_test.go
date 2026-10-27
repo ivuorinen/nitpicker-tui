@@ -200,3 +200,19 @@ func TestSort(t *testing.T) {
 		t.Errorf("Sort order = %q, want %q", got, want)
 	}
 }
+
+// A Facet outside Facets has no name, no value and no value order.
+func TestFacetOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	f := Facet(len(Facets))
+	if got := f.String(); got != "" {
+		t.Errorf("String() = %q, want empty", got)
+	}
+	if got := f.Of(Finding{Status: "open", Auditor: "a", Severity: "high", Category: "c"}); got != "" {
+		t.Errorf("Of() = %q, want empty", got)
+	}
+	if got := f.order(); got != nil {
+		t.Errorf("order() = %q, want nil", got)
+	}
+}
