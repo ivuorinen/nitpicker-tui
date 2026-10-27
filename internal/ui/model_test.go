@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -315,5 +317,40 @@ func TestViewShowsTitleAndRows(t *testing.T) {
 		if !strings.Contains(v.Content, want) {
 			t.Errorf("view lacks %q", want)
 		}
+	}
+}
+
+// altScreen is what a starting program writes first: it quits on q before
+// it draws a frame without a terminal, but it always enters the alternate
+// screen.
+const altScreen = "\x1b[?1049h"
+
+func TestRunQuitsOnQ(t *testing.T) {
+	t.Parallel()
+
+	store := loadStore(t, fixtureFiles())
+	var screen bytes.Buffer
+	err := Run(func() (findings.Store, error) { return store, nil },
+		tea.WithInput(strings.NewReader("q")), tea.WithOutput(&screen))
+	if err != nil {
+		t.Fatalf("Run = %v, want nil after q", err)
+	}
+	if !strings.Contains(screen.String(), altScreen) {
+		t.Errorf("the program never started: output %q", screen.String())
+	}
+}
+
+func TestRunReturnsLoadErrorBeforeStarting(t *testing.T) {
+	t.Parallel()
+
+	errGone := errors.New("store gone")
+	var screen bytes.Buffer
+	err := Run(func() (findings.Store, error) { return findings.Store{}, errGone },
+		tea.WithInput(strings.NewReader("q")), tea.WithOutput(&screen))
+	if !errors.Is(err, errGone) {
+		t.Errorf("Run = %v, want %v", err, errGone)
+	}
+	if screen.Len() != 0 {
+		t.Errorf("a program started after the failed load: %q", screen.String())
 	}
 }

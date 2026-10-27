@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
@@ -54,6 +57,83 @@ func TestRunWithoutStore(t *testing.T) {
 	code, _, errOut := runArgs(t.TempDir())
 	if code != 1 || !strings.Contains(errOut, "no docs/audit/findings") {
 		t.Errorf("run in a directory without a store = %d %q, want 1 and the reason", code, errOut)
+	}
+}
+
+// Not parallel: it swaps os.Args and exit, which every test shares.
+func TestMainExitsWithRunsCode(t *testing.T) {
+	args, prev := os.Args, exit
+	t.Cleanup(func() { os.Args, exit = args, prev })
+	os.Args = []string{"nitpicker-tui", "-version"}
+	code := -1
+	exit = func(c int) { code = c }
+
+	main()
+
+	if code != 0 {
+		t.Errorf("main exited with %d, want 0", code)
+	}
+}
+
+// runUI runs the program on dir without a terminal: input is typed into it,
+// and screen is what it writes. A program that starts always writes the
+// alternate-screen sequence first, even when it quits before drawing.
+func runUI(dir, input string, extra ...tea.ProgramOption) (code int, stderr, screen string) {
+	var out, errOut, scr bytes.Buffer
+	opts := append([]tea.ProgramOption{tea.WithInput(strings.NewReader(input)), tea.WithOutput(&scr)}, extra...)
+	code = run([]string{dir}, &out, &errOut, opts...)
+
+	return code, errOut.String(), scr.String()
+}
+
+func TestRunBrowsesAndQuits(t *testing.T) {
+	t.Parallel()
+
+	code, errOut, screen := runUI("testdata/store", "q")
+	if code != 0 || errOut != "" {
+		t.Errorf("run testdata/store = %d %q, want 0 and nothing on stderr", code, errOut)
+	}
+	if !strings.Contains(screen, "\x1b[?1049h") {
+		t.Errorf("the program never started: output %q", screen)
+	}
+}
+
+func TestRunReportsUIErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	code, errOut, _ := runUI("testdata/store", "", tea.WithContext(ctx))
+	if code != 1 || !strings.HasPrefix(errOut, "nitpicker-tui: program was killed") {
+		t.Errorf("run with a canceled program = %d %q, want 1 and the error", code, errOut)
+	}
+}
+
+// A store findStore accepts but cannot open fails before the program starts,
+// with the same message and exit code as before the first load moved into
+// ui.Run.
+func TestRunReportsUnreadableStore(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX permissions and a user they apply to")
+	}
+
+	project := t.TempDir()
+	store := filepath.Join(project, "docs", "audit", "findings")
+	if err := os.MkdirAll(store, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Empty, so t.TempDir's cleanup removes it without the mode restored.
+	if err := os.Chmod(store, 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	code, errOut, screen := runUI(project, "q")
+	if code != 1 || !strings.HasPrefix(errOut, "nitpicker-tui: ") || !strings.Contains(errOut, "permission denied") {
+		t.Errorf("run on an unreadable store = %d %q, want 1 and the error", code, errOut)
+	}
+	if screen != "" {
+		t.Errorf("a program started after the failed load: %q", screen)
 	}
 }
 

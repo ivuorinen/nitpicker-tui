@@ -28,13 +28,19 @@ containing dir, the current directory by default. Press ? for every key.
 
 `
 
+// exit is os.Exit; a test replaces it to run main in-process.
+var exit = os.Exit
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // run is the whole program; its result is the exit code: 0 on success, 1
-// when the store cannot be found or read, 2 for a usage error.
-func run(args []string, stdout, stderr io.Writer) int {
+// when the store cannot be found or read or the terminal UI fails, 2 for a
+// usage error. opts reach the program ui.Run starts: tests pass its input
+// and output, and main passes none, so bubbletea keeps its own terminal
+// handling, the TTY it opens when stdin is piped included.
+func run(args []string, stdout, stderr io.Writer, opts ...ui.Option) int {
 	flags := flag.NewFlagSet("nitpicker-tui", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
@@ -60,20 +66,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// A missing store, a failed first load and a failed UI leave through one
+	// exit path.
 	dir, err := findStore(cmp.Or(flags.Arg(0), "."))
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "nitpicker-tui:", err)
-
-		return 1
+	if err == nil {
+		err = ui.Run(newLoader(dir), opts...)
 	}
-	load := newLoader(dir)
-	store, err := load()
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "nitpicker-tui:", err)
-
-		return 1
-	}
-	if err := ui.Run(store, load); err != nil {
 		_, _ = fmt.Fprintln(stderr, "nitpicker-tui:", err)
 
 		return 1
