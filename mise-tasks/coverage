@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#MISE description="Race tests with statement, line and branch coverage; fails below 100%"
+#
+# Go measures statements only: lines are derived from the same profile, and
+# branches come from gobco -branch, pinned in mise.toml. The report goes to
+# stdout and, when GitHub Actions sets GITHUB_STEP_SUMMARY, to the job
+# summary. Any measure below 100% fails the task; nothing is excluded.
+set -euo pipefail
+
+# Outside `mise run`, whatever jq and gobco the shell has would be used.
+: "${MISE_TASK_NAME:?run it with: mise run coverage}"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+module=$(go list -m)
+go list ./... > "$tmp/packages"
+
+go test -v -race -covermode=atomic -coverpkg=./... -coverprofile="$tmp/cover.out" ./...
+
+# S <package> <statements run> <statements> <lines run> <lines> per package,
+# and U <file>:<line> per block with statements that never ran. Each test
+# binary writes its own copy of every block, so the counts are summed per
+# block first. A line is covered when every block with statements on it ran.
+awk -v module="$module" '
+  NR == 1 { next }
+  { stmts[$1] = $2; count[$1] += $3 }
+  END {
+    for (key in stmts) {
+      split(key, at, ":"); file = at[1]
+      split(at[2], span, ","); split(span[1], from, "."); split(span[2], to, ".")
+      pkg = file; sub(/\/[^\/]*$/, "", pkg)
+      name = file
+      if (index(file, module "/") == 1) name = substr(file, length(module) + 2)
+      total[pkg] += stmts[key]
+      if (count[key] > 0) run[pkg] += stmts[key]
+      else if (stmts[key] > 0) print "U\t`" name ":" from[1] "` statements never ran"
+      if (stmts[key] == 0) continue
+      for (l = from[1] + 0; l <= to[1] + 0; l++) {
+        line = file ":" l
+        if (!(line in ran)) { ran[line] = 1; owner[line] = pkg }
+        if (count[key] == 0) ran[line] = 0
+      }
+    }
+    for (line in ran) { lines[owner[line]]++; if (ran[line]) linesrun[owner[line]]++ }
+    for (pkg in total) printf "S\t%s\t%d\t%d\t%d\t%d\n", pkg, run[pkg], total[pkg], linesrun[pkg], lines[pkg]
+  }' "$tmp/cover.out" | sort -t: -k1,1 -k2,2n > "$tmp/profile.tsv"
+
+# B <package> <branch outcomes seen> <branch outcomes>, and U per branch with
+# an outcome never seen. gobco takes one package per call and exits 1 when a
+# test fails; its own output is shown only then.
+i=0
+while read -r pkg; do
+  i=$((i + 1))
+  dir=.
+  [ "$pkg" = "$module" ] || dir="./${pkg#"$module"/}"
+  stats="$tmp/branches-$i.json"
+  if ! gobco -branch -stats "$stats" "$dir" > "$tmp/gobco-$i.log" 2>&1; then
+    cat "$tmp/gobco-$i.log" >&2
+    echo "coverage: gobco failed for $dir" >&2
+    exit 1
+  fi
+  [ -s "$stats" ] || { echo "coverage: gobco wrote no stats for $dir" >&2; exit 1; }
+  jq -r --arg pkg "$pkg" '
+    "B\t\($pkg)\t\(map((if .TrueCount > 0 then 1 else 0 end) + (if .FalseCount > 0 then 1 else 0 end)) | add // 0)\t\(length * 2)",
+    (.[] | select(.TrueCount == 0 or .FalseCount == 0)
+      | "U\t`\(.Start)` branch `\(.Code)` never \(if .TrueCount == 0 and .FalseCount == 0 then "evaluated"
+          elif .TrueCount == 0 then "true" else "false" end)")
+  ' "$stats" >> "$tmp/branches.tsv"
+done < "$tmp/packages"
+
+# The report: one row per package in `go list` order, a total row, then every
+# gap. Percentages round down, so a measure short of complete never reads
+# 100.0%; the gate compares the counts.
+awk -F'\t' -v module="$module" -v below="$tmp/below" '
+  function cell(c, t) {
+    return t ? sprintf("%d/%d (%.1f%%)", c, t, int(1000 * c / t) / 10) : "0/0 (-)"
+  }
+  FILENAME == ARGV[1] { order[++n] = $1; next }
+  $1 == "S" { sr[$2] = $3; st[$2] = $4; lr[$2] = $5; lt[$2] = $6; next }
+  $1 == "B" { br[$2] = $3; bt[$2] = $4; next }
+  $1 == "U" { gaps[++g] = $2 }
+  END {
+    print "## Coverage"
+    print ""
+    print "| Package | Statements | Lines | Branches |"
+    print "| --- | ---: | ---: | ---: |"
+    for (i = 1; i <= n; i++) {
+      p = order[i]
+      show = p == module ? "." : "./" substr(p, length(module) + 2)
+      print "| " show " | " cell(sr[p], st[p]) " | " cell(lr[p], lt[p]) " | " cell(br[p], bt[p]) " |"
+      SR += sr[p]; ST += st[p]; LR += lr[p]; LT += lt[p]; BR += br[p]; BT += bt[p]
+    }
+    print "| Total | " cell(SR, ST) " | " cell(LR, LT) " | " cell(BR, BT) " |"
+    if (g) {
+      print ""
+      print "### Uncovered"
+      print ""
+      for (i = 1; i <= g; i++) print "- " gaps[i]
+    }
+    if (SR < ST || LR < LT || BR < BT) print "below" > below
+  }' "$tmp/packages" "$tmp/profile.tsv" "$tmp/branches.tsv" > "$tmp/report.md"
+
+cat "$tmp/report.md"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  cat "$tmp/report.md" >> "$GITHUB_STEP_SUMMARY"
+fi
+if [ -e "$tmp/below" ]; then
+  echo "coverage: below 100%" >&2
+  exit 1
+fi
