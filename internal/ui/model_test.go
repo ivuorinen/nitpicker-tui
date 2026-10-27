@@ -3,12 +3,15 @@ package ui
 import (
 	"bytes"
 	"errors"
+	"image/color"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2/styles"
 
 	"github.com/ivuorinen/nitpicker-tui/internal/findings"
 )
@@ -352,5 +355,102 @@ func TestRunReturnsLoadErrorBeforeStarting(t *testing.T) {
 	}
 	if screen.Len() != 0 {
 		t.Errorf("a program started after the failed load: %q", screen.String())
+	}
+}
+
+// otherMsg is a message no part of the model handles itself.
+type otherMsg struct{}
+
+// A message the model does not handle goes to whatever is on screen, and
+// leaves it as it was.
+func TestUnknownMessagesReachTheViewOnScreen(t *testing.T) {
+	t.Parallel()
+
+	list := newTestModel(t, fixtureFiles())
+	picker, _ := press(t, list, "l")
+	detail, _ := press(t, list, "enter")
+	for _, m := range []Model{list, picker, detail} {
+		got, cmd := step(t, m, otherMsg{})
+		got = settle(t, got, cmd)
+		if got.mode != m.mode {
+			t.Errorf("mode = %v after an unknown message, want %v", got.mode, m.mode)
+		}
+		if !slices.Equal(visibleIDs(got), visibleIDs(m)) {
+			t.Errorf("rows = %q after an unknown message, want %q", visibleIDs(got), visibleIDs(m))
+		}
+	}
+}
+
+// A mode outside the three views draws nothing; keys, other messages and
+// rescans fall back to the list.
+func TestOutOfRangeMode(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t, fixtureFiles())
+	m.mode = modeDetail + 1
+	if content := m.View().Content; content != "" {
+		t.Errorf("view = %q, want nothing drawn", content)
+	}
+
+	m, _ = press(t, m, "/")
+	if !m.search.Focused() {
+		t.Error("/ did not reach the list's search")
+	}
+	m, cmd := step(t, m, otherMsg{})
+	m = settle(t, m, cmd)
+	m = update(t, m, rescanMsg{store: loadStore(t, fixtureFiles())})
+	if m.mode != modeDetail+1 {
+		t.Errorf("mode = %v, want it left as it was", m.mode)
+	}
+}
+
+// The terminal's answer about its background picks the glamour style in the
+// list too, for the detail view opened later.
+func TestBackgroundColorInListSetsStyle(t *testing.T) {
+	t.Parallel()
+
+	m := update(t, newTestModel(t, fixtureFiles()), tea.BackgroundColorMsg{Color: color.White})
+	if m.style != styles.LightStyle || m.mode != modeList {
+		t.Errorf("style %q, mode %v; want the light style on the list", m.style, m.mode)
+	}
+}
+
+// enter with no row under the cursor stays on the list.
+func TestEnterWithNothingSelected(t *testing.T) {
+	t.Parallel()
+
+	m, _ := press(t, newTestModel(t, fixtureFiles()), "/")
+	m = typeText(t, m, "zzzz")
+	m, _ = press(t, m, "enter", "enter")
+	if rows := visibleIDs(m); len(rows) != 0 {
+		t.Fatalf("set-up: rows %q, want none", rows)
+	}
+	if m.mode != modeList || m.detail != nil {
+		t.Errorf("mode %v, detail %v; want the list and no finding", m.mode, m.detail)
+	}
+}
+
+// A key that only moves the search cursor leaves the query and the rows as
+// they were.
+func TestSearchKeyThatKeepsText(t *testing.T) {
+	t.Parallel()
+
+	m, _ := press(t, newTestModel(t, fixtureFiles()), "/")
+	m = typeText(t, m, "token")
+	before := visibleIDs(m)
+	m, _ = press(t, m, "left")
+	if m.query.Text != "token" || !slices.Equal(visibleIDs(m), before) {
+		t.Errorf("query %q, rows %q; want token and %q", m.query.Text, visibleIDs(m), before)
+	}
+}
+
+// FilterValue is what bubbles' own list filter would read; the browser
+// filters the list itself, and FilterValue is the title.
+func TestItemFilterValueIsTitle(t *testing.T) {
+	t.Parallel()
+
+	f := findings.Finding{Title: "T"}
+	if got := (item{f: &f}).FilterValue(); got != "T" {
+		t.Errorf("FilterValue() = %q, want the title", got)
 	}
 }

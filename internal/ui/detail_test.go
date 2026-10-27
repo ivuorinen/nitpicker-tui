@@ -209,3 +209,13 @@ func TestWarningsView(t *testing.T) {
 		t.Errorf("warnings view lacks the damaged file: %q", content)
 	}
 }
+
+// A key other than back scrolls the detail view and stays in it.
+func TestDetailKeepsNonBackKeys(t *testing.T) {
+	t.Parallel()
+
+	m, _ := press(t, newTestModel(t, fixtureFiles()), "enter", "down")
+	if m.mode != modeDetail {
+		t.Errorf("mode = %v after down, want detail", m.mode)
+	}
+}

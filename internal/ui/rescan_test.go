@@ -7,6 +7,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/ivuorinen/nitpicker-tui/internal/findings"
 )
 
@@ -205,5 +207,83 @@ func TestRescanRebuildsOpenPicker(t *testing.T) {
 
 	if !slices.Contains(pickerTitles(m), "  perf (1)") {
 		t.Errorf("picker rows = %q, want the new perf lens", pickerTitles(m))
+	}
+}
+
+// openWhileRescanning searches for query, starts a rescan from the list, and
+// opens the finding the search leaves under the cursor before the rescan's
+// result arrives, which it returns.
+func openWhileRescanning(t *testing.T, m Model, query string) (Model, tea.Cmd) {
+	t.Helper()
+
+	m, _ = press(t, m, "/")
+	m = typeText(t, m, query)
+	m, _ = press(t, m, "enter")
+	m, held := step(t, m, keyMsg("r"))
+	m, _ = press(t, m, "enter")
+	if m.mode != modeDetail {
+		t.Fatalf("set-up: mode = %v, want detail", m.mode)
+	}
+
+	return m, held
+}
+
+// A rescan re-renders an open finding from the new store.
+func TestRescanRefreshesOpenDetail(t *testing.T) {
+	t.Parallel()
+
+	const file, retitled = "security/open/security-00000002.md", "Secret in logs, again"
+	changed := fixtureFiles()
+	changed[file] = &fstest.MapFile{Data: []byte(strings.Replace(string(changed[file].Data),
+		"# Secret in logs", "# "+retitled, 1))}
+	var calls int
+	m := newReloadingModel(t, fixtureFiles(), reloadFrom(t, changed, &calls))
+	m, held := openWhileRescanning(t, m, "secret")
+
+	m = settle(t, m, held)
+
+	if m.detail.ID != idSecurityOpen || m.detail.Title != retitled {
+		t.Errorf("detail = %s %q, want %s retitled", m.detail.ID, m.detail.Title, idSecurityOpen)
+	}
+	if !strings.Contains(m.View().Content, retitled) {
+		t.Error("detail view does not show the new title")
+	}
+}
+
+// A rescan that drops the finding on screen leaves it there as it was read.
+func TestRescanKeepsVanishedDetail(t *testing.T) {
+	t.Parallel()
+
+	const gone = "docs-00000003"
+	var calls int
+	m := newReloadingModel(t, fixtureFiles(), reloadFrom(t, rescannedFiles(), &calls))
+	m, held := openWhileRescanning(t, m, "stale")
+
+	m = settle(t, m, held)
+
+	if m.detail.ID != gone || !strings.Contains(m.View().Content, "Stale README") {
+		t.Errorf("detail = %s; want %s still shown", m.detail.ID, gone)
+	}
+}
+
+// A rescan with no row under the cursor, whose result shows none either,
+// leaves both so.
+func TestRescanWithNothingSelected(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	m := newReloadingModel(t, fixtureFiles(), reloadFrom(t, fixtureFiles(), &calls))
+	m, _ = press(t, m, "/")
+	m = typeText(t, m, "zzzz")
+	m, _ = press(t, m, "enter")
+
+	m, cmd := step(t, m, keyMsg("r"))
+	m = settle(t, m, cmd)
+
+	if calls != 1 {
+		t.Errorf("reload ran %d times, want 1", calls)
+	}
+	if got := selectedID(m); got != "" || len(m.list.Items()) != 0 {
+		t.Errorf("cursor on %q over %d rows, want none", got, len(m.list.Items()))
 	}
 }
