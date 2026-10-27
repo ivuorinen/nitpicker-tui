@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +15,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 )
+
+// goosWindows is runtime.GOOS on Windows, whose filesystem rules some tests
+// cannot exercise.
+const goosWindows = "windows"
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
@@ -114,7 +119,7 @@ func TestRunReportsUIErrors(t *testing.T) {
 // ui.Run.
 func TestRunReportsUnreadableStore(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+	if runtime.GOOS == goosWindows || os.Geteuid() == 0 {
 		t.Skip("needs POSIX permissions and a user they apply to")
 	}
 
@@ -189,7 +194,7 @@ func TestFindStoreRefusesSymlinkedComponent(t *testing.T) {
 // a missing path, so the case is checked where the name gives ENAMETOOLONG.
 func TestFindStoreReportsStatErrors(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("Windows reports an over-long name as a missing path, not as a stat error")
 	}
 
@@ -198,6 +203,29 @@ func TestFindStoreReportsStatErrors(t *testing.T) {
 	got, err := findStore(project)
 	if !errors.Is(err, syscall.ENAMETOOLONG) {
 		t.Errorf("findStore under a 300-byte name = %q, %v; want ENAMETOOLONG", got, err)
+	}
+}
+
+// A working directory that no longer exists cannot be made absolute; that is
+// reported, not taken for a missing store. Not parallel: t.Chdir changes the
+// whole process's working directory.
+func TestFindStoreReportsUnresolvableWorkingDir(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("Windows cannot remove a process's working directory")
+	}
+
+	gone := filepath.Join(t.TempDir(), "gone")
+	if err := os.Mkdir(gone, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := findStore(".")
+	if !errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "no docs/audit/findings") {
+		t.Errorf("findStore from a removed directory = %q, %v; want the getwd error", got, err)
 	}
 }
 
@@ -294,5 +322,15 @@ func TestLoaderSeesChangesBetweenLoads(t *testing.T) {
 	want := []string{"audit-00000001", "audit-00000002", "audit-00000003", "audit-00000004"}
 	if got := loadedIDs(t, ids); !slices.Equal(got, want) {
 		t.Errorf("second load = %q, want %q", got, want)
+	}
+}
+
+// A store removed between loads fails the next load with os.OpenRoot's error.
+func TestLoaderReportsUnopenableStore(t *testing.T) {
+	t.Parallel()
+
+	_, err := newLoader(filepath.Join(t.TempDir(), "missing"))()
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("loading a missing store = %v, want a not-exist error", err)
 	}
 }
