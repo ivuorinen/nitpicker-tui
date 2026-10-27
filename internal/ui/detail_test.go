@@ -121,6 +121,21 @@ func TestKeepStyling(t *testing.T) {
 	}
 }
 
+// glamour rejects an unknown style name; the markdown is then shown as it is,
+// below the error, and still passes through keepStyling.
+func TestRenderBodyFallsBackOnRenderError(t *testing.T) {
+	t.Parallel()
+
+	got := renderBody("body \x1b[2Jtext", "no-such-style", 80)
+	const want = "render failed: no-such-style: style not found\n\n"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("renderBody = %q, want the prefix %q", got, want)
+	}
+	if !strings.Contains(got, "body text") || strings.Contains(got, "\x1b[2J") {
+		t.Errorf("fallback body %q: want the text, without the escape", got)
+	}
+}
+
 func TestBackgroundColorPicksStyle(t *testing.T) {
 	t.Parallel()
 

@@ -112,17 +112,19 @@ func findStore(start string) (string, error) {
 // refuseSymlinks fails when any of parts, joined one by one under base, is a
 // symlink. findings.py refuses a store reached through a symlink; os.Stat and
 // os.OpenRoot would follow one, letting a cloned repository point the browser
-// at another directory on the machine.
+// at another directory on the machine. An Lstat can fail only when the path
+// vanishes after findStore's Stat; that error leaves through the branch the
+// refusal takes.
 func refuseSymlinks(base string, parts ...string) error {
 	p := base
 	for _, part := range parts {
 		p = filepath.Join(p, part)
 		info, err := os.Lstat(p)
+		if err == nil && info.Mode()&fs.ModeSymlink != 0 {
+			err = fmt.Errorf("refusing to follow the symlink %s", p)
+		}
 		if err != nil {
 			return err
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to follow the symlink %s", p)
 		}
 	}
 
