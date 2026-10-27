@@ -125,5 +125,5 @@ echo "Tag $tag pushed. GitHub Actions will build and sign the release."
 '''
 
 [tasks.all]
-description = "Lint, race-enabled tests, vulnerability scan and build: the CI gates"
-depends = ["lint", "test-race", "vuln", "build"]
+description = "Lint, race tests with the 100% coverage gate, vulnerability scan and build: the CI gates"
+depends = ["lint", "coverage", "vuln", "build"]
