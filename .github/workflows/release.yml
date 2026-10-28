@@ -43,7 +43,7 @@ jobs:
         with:
           # The goreleaser mise.toml pins, the one `goreleaser check` and
           # snapshot builds run locally; bump the two together.
-          version: "v2.18.3"
+          version: "v2.19.0"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
