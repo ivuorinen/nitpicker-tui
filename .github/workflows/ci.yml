@@ -22,7 +22,7 @@ concurrency:
 # the customManagers:githubActionsVersions preset, and the tools via mise.toml.
 env:
   # renovate: datasource=github-releases depName=jdx/mise
-  MISE_VERSION: v2026.10.8
+  MISE_VERSION: v2026.10.21
 
 jobs:
   test:
@@ -37,7 +37,7 @@ jobs:
           # token does not need to stay in the git config afterwards.
           persist-credentials: false
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8  # v5.1.2
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
         with:
           version: ${{ env.MISE_VERSION }}
 
@@ -95,7 +95,7 @@ jobs:
           # token does not need to stay in the git config afterwards.
           persist-credentials: false
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8  # v5.1.2
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
         with:
           version: ${{ env.MISE_VERSION }}
 
