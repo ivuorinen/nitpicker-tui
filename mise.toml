@@ -17,7 +17,7 @@ idiomatic_version_file_enable_tools = ["go"]
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
 # Branch coverage for `mise run coverage`: Go itself measures statements only.
 "go:github.com/rillig/gobco" = "1.3.4"
-gh = "2.102.0"
+gh = "2.103.3"
 golangci-lint = "2.15.0"
 goreleaser = "2.19.0"
 # Reads the Claude Code hook's JSON input (lint:hook) and gobco's coverage
