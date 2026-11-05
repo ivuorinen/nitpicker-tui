@@ -24,7 +24,7 @@ goreleaser = "2.19.0"
 # stats (coverage).
 jq = "1.8.2"
 # Runs the .pre-commit-config.yaml hooks.
-prek = "0.5.7"
+prek = "0.5.9"
 
 [tasks.build]
 description = "Build for the current platform"
