@@ -113,8 +113,8 @@ rescan call: `os.OpenRoot` -> `findings.Load(root.FS())` -> close.
 
 ## Build & Release
 
-- Releases are CalVer tags (`20*`). `mise run release` tags the next version
-  with gh-calver and pushes it; `.github/workflows/release.yml` runs
+- Releases are SemVer tags (`v*.*.*`). `mise run release` tags the next version
+  with svu and pushes it; `.github/workflows/release.yml` runs
   goreleaser at the version mise.toml pins (keep the two in step), which
   builds linux, darwin and windows `nitpicker-tui` binaries, signs the
   checksums with cosign keyless, and attaches `LICENSE` and the go-licenses
