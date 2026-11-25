@@ -1,5 +1,8 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
+[settings]
+idiomatic_version_file_enable_tools = ["go"]
+
 # Renovate's mise manager bumps these, so a version change is always a commit.
 #
 # govulncheck is built from source with the go.mod toolchain (the go: backend).
