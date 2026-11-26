@@ -4,7 +4,7 @@ name: Release
 on:
   push:
     tags:
-      - "20*"
+      - "v*.*.*"
 
 permissions: {}
 
@@ -20,30 +20,30 @@ jobs:
     # No attestations are produced, so attestations: write is deliberately
     # not granted.
     permissions:
-      contents: write  # create the GitHub release and upload its assets
-      id-token: write  # cosign keyless signing of the checksums file
+      contents: write # create the GitHub release and upload its assets
+      id-token: write # cosign keyless signing of the checksums file
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # goreleaser publishes through GITHUB_TOKEN in its environment and
           # only reads git history, so the token need not stay in git config.
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           # Signed release artifacts are built from a clean cache: a restored
           # build cache is an input nothing in this job verifies.
           cache: false
 
-      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
 
-      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           # The goreleaser mise.toml pins, the one `goreleaser check` and
           # snapshot builds run locally; bump the two together.
-          version: "v2.20.2"
+          version: "v2.20.3"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
