@@ -120,9 +120,12 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   echo "Error: main is not the same commit as origin/main" >&2
   exit 1
 fi
-tag=$(svu next --tag.mode current --v0 --tag.pattern 'v*')
+# No --tag.pattern: with one, a repository without a matching tag is an
+# error, while without one svu counts from v0.0.0, so the first release
+# needs no baseline tag.
+tag=$(svu next --tag.mode current --v0)
 # svu next prints the current tag when no commit calls for a new version.
-if [ "$tag" = "$(svu current --tag.mode current --tag.pattern 'v*')" ]; then
+if [ "$tag" = "$(svu current --tag.mode current)" ]; then
   echo "Nothing to release: no commit since $tag calls for a new version" >&2
   exit 1
 fi
